@@ -1,0 +1,683 @@
+openapi: 3.1.0
+info:
+  title: Open Brochure API
+  version: 1.1.0
+  description: |
+    REST API for Open Brochure (openbrochure.com).
+    Supports uploading, viewing, sharing, embedding, and downloading tri-fold brochures.
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+tags:
+  - name: Auth
+    description: Authentication endpoints (Supabase Auth handles most)
+  - name: Brochures
+    description: Brochure management
+  - name: Panels
+    description: Panel arrangement
+  - name: Share
+    description: Sharing and embedding
+  - name: Downloads
+    description: File downloads and mockups
+
+paths:
+  # ============================================================================
+  # AUTH
+  # ============================================================================
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # BROCHURES
+  # ============================================================================
+  /brochures:
+    get:
+      tags: [Brochures]
+      summary: Get user's brochure library
+      description: Returns all brochures owned by the authenticated user with view counts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of brochures
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  brochures:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LibraryBrochure'
+                  total:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Brochures]
+      summary: Upload a new brochure
+      description: |
+        Upload an image (JPG, PNG) or PDF to create a new brochure.
+        Returns detected panels for user confirmation.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image (JPG, PNG) or PDF file, max 25MB
+                name:
+                  type: string
+                  description: Optional name (defaults to filename)
+      responses:
+        '201':
+          description: Brochure created with detected panels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrochureWithPanels'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: File too large (> 25MB)
+
+  /brochures/{id}:
+    get:
+      tags: [Brochures]
+      summary: Get a brochure with panels
+      description: Returns brochure details and all panel data for the viewer
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      responses:
+        '200':
+          description: Brochure with panels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrochureWithPanels'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Brochures]
+      summary: Update brochure metadata
+      description: Update name or visibility. Owner only.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 200
+                visibility:
+                  $ref: '#/components/schemas/Visibility'
+      responses:
+        '200':
+          description: Updated brochure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Brochure'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Brochures]
+      summary: Delete a brochure
+      description: Permanently delete brochure and all panels. Owner only.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      responses:
+        '204':
+          description: Deleted successfully
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================================
+  # PANELS
+  # ============================================================================
+  /brochures/{id}/panels:
+    put:
+      tags: [Panels]
+      summary: Update panel arrangement
+      description: |
+        Rearrange panels by updating their positions.
+        Expects all 6 panels with new position assignments.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - panels
+              properties:
+                panels:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - id
+                      - position
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      position:
+                        $ref: '#/components/schemas/PanelPosition'
+                  minItems: 1
+                  maxItems: 6
+      responses:
+        '200':
+          description: Updated panels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Panel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ============================================================================
+  # SHARE
+  # ============================================================================
+  /brochures/{id}/share:
+    post:
+      tags: [Share]
+      summary: Generate share link
+      description: |
+        Generates a share token if not already present.
+        Returns the shareable URL and QR code data URL.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      responses:
+        '200':
+          description: Share link generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shareUrl:
+                    type: string
+                    format: uri
+                    example: https://openbrochure.com/view/abc123xyz789
+                  shareToken:
+                    type: string
+                  qrCodeDataUrl:
+                    type: string
+                    description: Base64 PNG data URL of QR code
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /brochures/{id}/qr:
+    get:
+      tags: [Share]
+      summary: Get QR code for share link
+      description: |
+        Returns QR code as PNG image for the brochure's share link.
+        Only works if brochure has a share token.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 200
+            minimum: 100
+            maximum: 1000
+          description: QR code size in pixels
+      responses:
+        '200':
+          description: QR code PNG image
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Brochure not found or no share token
+
+  /brochures/{id}/embed:
+    get:
+      tags: [Share]
+      summary: Get embed code
+      description: |
+        Returns HTML embed code for public brochures.
+        Returns 403 if brochure is private.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+        - name: width
+          in: query
+          schema:
+            type: integer
+            default: 800
+        - name: height
+          in: query
+          schema:
+            type: integer
+            default: 600
+      responses:
+        '200':
+          description: Embed code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  embedCode:
+                    type: string
+                    description: HTML iframe code
+                    example: '<iframe src="https://openbrochure.com/embed/abc123" width="800" height="600"></iframe>'
+                  embedUrl:
+                    type: string
+                    format: uri
+        '403':
+          description: Brochure is private, cannot embed
+
+  /view/{shareToken}:
+    get:
+      tags: [Share]
+      summary: View shared brochure
+      description: |
+        Public endpoint to view a brochure by share token.
+        Increments view count (unless viewer is owner).
+      parameters:
+        - name: shareToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Brochure data for viewer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrochureWithPanels'
+        '404':
+          description: Brochure not found or no longer available
+
+  /embed/{brochureId}:
+    get:
+      tags: [Share]
+      summary: Embed viewer endpoint
+      description: |
+        Returns HTML page for iframe embedding.
+        Only works for public brochures.
+        Increments view count.
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      responses:
+        '200':
+          description: Embeddable viewer HTML
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: Brochure not found or private
+
+  # ============================================================================
+  # DOWNLOADS
+  # ============================================================================
+  /brochures/{id}/download/original:
+    get:
+      tags: [Downloads]
+      summary: Download original file
+      description: |
+        Download the original uploaded file (image or PDF).
+        Owner only.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      responses:
+        '200':
+          description: Original file
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /brochures/{id}/download/mockup:
+    get:
+      tags: [Downloads]
+      summary: Download mockup PDF
+      description: |
+        Download a PDF containing realistic mockup images of the brochure
+        in various 3D views (folded, partially open, fully open).
+        Owner only.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/BrochureId'
+      responses:
+        '200':
+          description: Mockup PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================================
+  # UPLOAD
+  # ============================================================================
+  /upload/presigned:
+    post:
+      tags: [Brochures]
+      summary: Get presigned upload URL
+      description: |
+        Get a presigned URL for direct upload to R2.
+        Used for client-side uploads to bypass server.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - filename
+                - contentType
+              properties:
+                filename:
+                  type: string
+                contentType:
+                  type: string
+                  enum: [image/jpeg, image/png, application/pdf]
+      responses:
+        '200':
+          description: Presigned URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadUrl:
+                    type: string
+                    format: uri
+                  fileKey:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase JWT token
+
+  parameters:
+    BrochureId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Visibility:
+      type: string
+      enum: [public, private]
+
+    PanelPosition:
+      type: string
+      enum:
+        - cover
+        - back
+        - inside_flap
+        - left_panel
+        - center_panel
+        - right_panel
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        provider:
+          type: string
+          enum: [google, apple, azure]
+        createdAt:
+          type: string
+          format: date-time
+
+    Brochure:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+          nullable: true
+        name:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/Visibility'
+        originalFileUrl:
+          type: string
+          format: uri
+        originalFileType:
+          type: string
+          enum: [image, pdf]
+        thumbnailUrl:
+          type: string
+          format: uri
+          nullable: true
+        shareToken:
+          type: string
+          nullable: true
+        viewCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Panel:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        brochureId:
+          type: string
+          format: uuid
+        position:
+          $ref: '#/components/schemas/PanelPosition'
+        imageUrl:
+          type: string
+          format: uri
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 5
+
+    BrochureWithPanels:
+      allOf:
+        - $ref: '#/components/schemas/Brochure'
+        - type: object
+          properties:
+            panels:
+              type: array
+              items:
+                $ref: '#/components/schemas/Panel'
+
+    LibraryBrochure:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/Visibility'
+        thumbnailUrl:
+          type: string
+          format: uri
+          nullable: true
+        viewCount:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

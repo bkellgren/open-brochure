@@ -1,0 +1,33 @@
+{
+  "name": "open-brochure",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Interactive 3D tri-fold brochure viewer",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter backend dev\" \"pnpm --filter frontend dev\"",
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "build": "pnpm --filter shared build && pnpm --filter backend build && pnpm --filter frontend build",
+    "test": "pnpm --filter \"*\" test",
+    "lint": "pnpm --filter \"*\" lint",
+    "format": "prettier --write \"**/*.{ts,js,svelte,json,md,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,js,svelte,json,md,css}\"",
+    "typecheck": "pnpm --filter \"*\" typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.2.4",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.1"
+}
